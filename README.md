@@ -1,4 +1,7 @@
 # VAM OS 🧠  
+
+### (그냥 Readme 는 GPT 시켰습니다. 귀찮았어요.)
+
 A lightweight 32-bit x86 kernel written in C and Assembly.  
 Developed **solo by a 15-year-old student** over the course of **2 months** —  
 as a personal challenge to learn how computers work at the lowest level.
