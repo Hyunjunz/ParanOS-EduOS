@@ -1,22 +1,22 @@
+// kernel/tss.c
+#include <stdint.h>
+#include "gdt.h"   // struct tss64, extern struct tss64 g_tss;
 #include "tss.h"
-#include <string.h>
-#include <stddef.h>
 
-extern tss_t g_tss;
-
-void tss_set_kernel_stack(uint32_t stack_top) {
-    g_tss.esp0 = stack_top;
+/*
+ * Long mode TSS 초기화.
+ * gdt_init() 안에서 기본적인 초기화는 이미 해주고 있으니
+ * 여기서는 필요한 추가 세팅만 합니다.
+ */
+void tss_init_fields(void) {
+    // I/O bitmap 오프셋: TSS 구조체 끝으로 설정
+    g_tss.iopb_offset = sizeof(struct tss64);
 }
 
-void tss_init_fields(uint32_t kernel_stack_top, uint16_t kernel_data_sel) {
-    memset(&g_tss, 0, sizeof(g_tss));
-
-    g_tss.ss0  = kernel_data_sel;     // 예: 0x10
-    g_tss.esp0 = kernel_stack_top;
-
-    g_tss.iomap_base = (uint16_t)offsetof(tss_t, io_bitmap);
-    memset(g_tss.io_bitmap, 0xFF, sizeof(g_tss.io_bitmap));
-    g_tss.io_bitmap[sizeof(g_tss.io_bitmap) - 1] = 0xFF;
-
-    g_tss.trap = 0;
+/*
+ * 스케줄러(task.c)에서 쓰는 커널 스택 설정 함수.
+ * 현재 실행 중인 태스크에 맞게 RSP0를 바꿉니다.
+ */
+void tss_set_kernel_stack(uint64_t stack_top) {
+    g_tss.rsp0 = stack_top;
 }

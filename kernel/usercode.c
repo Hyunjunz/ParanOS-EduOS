@@ -1,15 +1,11 @@
 #include "serial.h"
 
 void user_mode_start(void) {
-    const char *msg = "TEST USER MODE";
-    __asm__ volatile(
-        "movl $0, %%eax\n"
-        "movl %[msg], %%ebx\n"
-        "int $0x80\n"
-        :
-        : [msg]"r"(msg)
-        : "eax", "ebx"
-    );
+    const char *msg = "TEST USER MODE\n";
 
-    for (;;) __asm__ volatile("hlt");
+    serial_printf("%s", msg);
+
+    while (1) {
+        __asm__ volatile("hlt");
+    }
 }

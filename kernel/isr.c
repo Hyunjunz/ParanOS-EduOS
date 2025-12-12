@@ -38,17 +38,18 @@ void isr_handler_c(uint32_t int_no) {
     /* PIC EOI: IRQ 범위(0x20~0x2F)면 EOI 발신 */
     if (int_no >= 32 && int_no <= 47) {
         uint8_t irq = (uint8_t)(int_no - 32);
-        pic_eoi(irq);   // ✅ pic_send_eoi 대신 pic_eoi 통일
+        pic_eoi(irq);   
     }
 }
 
 /* NASM isr_stub → isr_common_handler() 호출 */
-void isr_common_handler(uint32_t vector, uint32_t error_code) {
-    //serial_printf("[ISR] vector=%u, err=%u\n", vector, error_code);
+void isr_common_handler(uint32_t vector, uint32_t error_code, uint64_t *frame) {
+    /* Uncomment for IRQ/exception debug noise */
+    // serial_printf("[ISR] vector=%u, err=%u\n", vector, error_code);
 
     // 재진입 예외 방지
     if (handling_exception) {
-        panic_handle_s(vector, error_code);
+        panic_handle_s(vector, error_code, frame);
         cli();
         hlt();
         for(;;);
@@ -68,7 +69,7 @@ void isr_common_handler(uint32_t vector, uint32_t error_code) {
     // CPU 예외
     if (vector < 32) {
         handling_exception = true;
-        panic_handle_s(vector, error_code);
+        panic_handle(vector, error_code, frame); // show panic screen + log
         handling_exception = false;
     }
 }

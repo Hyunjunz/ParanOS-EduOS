@@ -1,6 +1,6 @@
 #include <stddef.h>
 #include <stdint.h>
-#include "pmm.h"
+#include <mm/pmm.h>
 
 void* malloc(size_t size)
 {
@@ -8,7 +8,7 @@ void* malloc(size_t size)
     size_t pages = (size + 4095) / 4096;
     void* block = NULL;
     for (size_t i = 0; i < pages; ++i) {
-        void* p = pmm_alloc();
+        void* p = ext_mem_alloc(4096);
         if (!p) return NULL;
         if (i == 0) block = p;
     }
@@ -17,6 +17,8 @@ void* malloc(size_t size)
 
 void free(void* ptr)
 {
-    if (ptr)
-        pmm_free(ptr);
+    if (ptr) {
+        // pmm_free expects (ptr, size); this simple free releases one page.
+        pmm_free(ptr, 4096);
+    }
 }

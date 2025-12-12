@@ -1,5 +1,5 @@
 # =====================================================
-#   VAM Kernel Build System (with Tasking support)
+#   VAM Kernel Build System (Limine/UEFI + BIOS)
 # =====================================================
 
 SHELL := /bin/bash
@@ -8,17 +8,30 @@ AS       = nasm
 CC       = gcc
 LD       = ld
 OBJCOPY  = objcopy
-GRUBMK   = grub-mkrescue
 
-CFLAGS   = -m32 -ffreestanding -fno-pic -fno-pie -fno-stack-protector -O2 -Wall -Wextra \
-           -Ikernel -Ikernel/mm -Ikernel/include -Ikernel/task
-LDFLAGS  = -m elf_i386 -nostdlib
+CFLAGS = -m64 -mcmodel=kernel -ffreestanding -fno-pic -fno-pie -fno-stack-protector \
+         -O2 -Wall -Wextra -nostdlib -nostdinc \
+         -Ikernel -Ikernel/mm -Ikernel/include -Ikernel/task -Ilimine \
+         -DBIOS -DCOM_OUTPUT=0 -DFLANTERM_IN_FLANTERM \
+		 -mno-mmx -mno-sse -mno-sse2 -mno-sse3 -mno-avx -mno-80387 -mno-red-zone \
+		 -g -ggdb -fno-eliminate-unused-debug-types
+
+
+LDFLAGS  = -m elf_x86_64 -nostdlib
 
 BUILD       = build
 ISO_DIR     = iso_root
+LIMINE_DIR  = limine
 KERNEL_ELF  = $(BUILD)/kernel.elf
 KERNEL_MAP  = $(BUILD)/kernel.map
 FONT_PSF    = font/Cyr_a8x14.psf
+FONT_TTF    ?=
+FONT_SIZE   ?= 16
+FONT_EMBOLDEN ?= 0
+FONT_CELL_W ?=
+FONT_BIN    = $(BUILD)/font_gray.gfn
+TTF2GFNT    = $(BUILD)/ttf2gfnt
+TTF2GFNT_SRC= tools/ttf2gfnt.c
 FONT_OBJ    = $(BUILD)/font_psf.o
 LINKER      = kernel/linker.ld
 
@@ -26,81 +39,66 @@ LINKER      = kernel/linker.ld
 #   Source Files
 # =====================================================
 
-KERNEL_C_SRC = \
-	kernel/kernel.c \
-	kernel/bootinfo.c \
-	kernel/lfb.c \
-	kernel/pmm.c \
-	kernel/mm/vmm.c \
-	kernel/idt.c \
-	kernel/isr.c \
-	kernel/pic.c \
-	kernel/pit.c \
-	kernel/serial.c \
-	kernel/keyboard.c \
-	kernel/gdt.c \
-	kernel/tss.c \
-	kernel/syscall.c \
-	kernel/fb.c \
-	kernel/psf.c \
-	kernel/string.c \
-	kernel/io.c \
-	kernel/mm/kmalloc.c \
-	kernel/panic/panic.c \
-	kernel/tss_panic/df_tss.c \
-	kernel/task/task.c  \
-	kernel/usercode.c
+KERNEL_C_SRC  := $(shell find kernel -type f -name '*.c')
+KERNEL_ASM_SRC := $(shell find kernel -type f -name '*.asm')
+KERNEL_S_SRC  := $(shell find kernel -type f -name '*.S')
 
-KERNEL_ASM_SRC = \
-	kernel/isr_asm.asm \
-	kernel/isr_stub.asm \
-	kernel/user_enter.asm \
-	kernel/kernel_entry.asm \
-	kernel/gdt_flush.asm \
-	kernel/tss_flush.asm \
-	kernel/idt_load.asm \
-	kernel/tss_panic/df_task.asm
+# =====================================================
+#   Default
+# =====================================================
 
-KERNEL_S_SRC = \
-	kernel/usermode_trampoline.S\
-	kernel/task/switch.S 
-# =====================================================
-#   Default Target
-# =====================================================
 all: $(BUILD) $(KERNEL_ELF) iso
 
 $(BUILD):
 	mkdir -p $(BUILD)
 
 # =====================================================
-#   Compilation Rules
+#   Compile Objects
 # =====================================================
 
-# C source
 $(BUILD)/%.o: kernel/%.c | $(BUILD)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# Assembly (.asm)
+
 $(BUILD)/%.o: kernel/%.asm | $(BUILD)
 	@mkdir -p $(dir $@)
-	$(AS) -f elf32 $< -o $@
+	$(AS) -f elf64  $< -o $@
 
-# Assembly (.S)
+
 $(BUILD)/%.o: kernel/%.S | $(BUILD)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# Font binary → object
-$(FONT_OBJ): $(FONT_PSF) | $(BUILD)
+# =====================================================
+#   Font
+# =====================================================
+
+ifeq ($(strip $(FONT_TTF)),)
+FONT_BLOB := $(FONT_PSF)
+else
+FONT_BLOB := $(FONT_BIN)
+endif
+
+FONT_SYM_PREFIX := _binary_$(subst .,_,$(subst /,_,$(FONT_BLOB)))
+
+$(TTF2GFNT): $(TTF2GFNT_SRC) tools/stb_truetype.h | $(BUILD)
+	$(CC) -O2 -std=c99 -Wall -Wextra -o $@ $< -lm
+
+$(FONT_BIN): $(FONT_TTF) $(TTF2GFNT) | $(BUILD)
+	$(TTF2GFNT) $(FONT_TTF) $(FONT_SIZE) $@ $(FONT_EMBOLDEN) $(FONT_CELL_W)
+
+$(FONT_OBJ): $(FONT_BLOB) | $(BUILD)
 	@mkdir -p $(dir $@)
-	$(OBJCOPY) -I binary -O elf32-i386 -B i386 $< $@ \
-		--redefine-sym _binary_font_Cyr_a8x14_psf_start=_binary_font_psf_start \
-		--redefine-sym _binary_font_Cyr_a8x14_psf_end=_binary_font_psf_end \
+	objcopy -I binary -O elf64-x86-64 -B i386:x86-64 \
+		$(FONT_BLOB) $@ \
+		--redefine-sym $(FONT_SYM_PREFIX)_start=_binary_font_psf_start \
+		--redefine-sym $(FONT_SYM_PREFIX)_end=_binary_font_psf_end \
 		--rename-section .data=.rodata.font
 
+
 # =====================================================
-#   Object Linking
+#   Link
 # =====================================================
 
 KOBJ = \
@@ -109,51 +107,104 @@ KOBJ = \
 	$(patsubst kernel/%.S,  $(BUILD)/%.o, $(KERNEL_S_SRC)) \
 	$(FONT_OBJ)
 
+# Remove duplicate implementations we don't want to link twice
+KOBJ := $(filter-out \
+	$(BUILD)/limine.o \
+	$(BUILD)/sys/pic.o \
+	$(BUILD)/protos/chainload.o \
+	$(BUILD)/sys/idt.s2.o \
+	$(BUILD)/stubs.o \
+, $(KOBJ))
+
 $(KERNEL_ELF): $(KOBJ) $(LINKER)
 	$(LD) $(LDFLAGS) -T $(LINKER) -Map $(KERNEL_MAP) -o $@ $(KOBJ)
 
 # =====================================================
-#   ISO Image Build
+#   Limine ISO Build
 # =====================================================
+
 iso: $(KERNEL_ELF)
-	mkdir -p $(ISO_DIR)/boot/grub
+	rm -rf $(ISO_DIR)
+	mkdir -p $(ISO_DIR)
+
+	# Copy Limine bootloader files (from releases)
+	#mkdir -p $(ISO_DIR)/limine
+	cp $(LIMINE_DIR)/limine.sys           $(ISO_DIR)/
+	cp $(LIMINE_DIR)/limine-bios.sys     $(ISO_DIR)/
+	cp $(LIMINE_DIR)/limine-cd.bin       $(ISO_DIR)/
+	cp $(LIMINE_DIR)/limine-uefi-cd.bin  $(ISO_DIR)/
+
+	# EFI executable
+	mkdir -p $(ISO_DIR)/EFI/BOOT
+	cp $(LIMINE_DIR)/BOOTX64.EFI          $(ISO_DIR)/EFI/BOOT/
+
+	# Kernel
+	mkdir -p $(ISO_DIR)/boot
 	cp $(KERNEL_ELF) $(ISO_DIR)/boot/kernel.elf
-	echo 'set timeout_style=menu'                 >  $(ISO_DIR)/boot/grub/grub.cfg
-	echo 'set timeout=5'                         >> $(ISO_DIR)/boot/grub/grub.cfg
-	echo 'set default=0'                         >> $(ISO_DIR)/boot/grub/grub.cfg
-	echo 'set gfxpayload=text'                   >> $(ISO_DIR)/boot/grub/grub.cfg
-	echo 'terminal_output console'               >> $(ISO_DIR)/boot/grub/grub.cfg
-	echo 'menuentry "VAM Kernel (multiboot2)" {' >> $(ISO_DIR)/boot/grub/grub.cfg
-	echo '  multiboot2 /boot/kernel.elf'         >> $(ISO_DIR)/boot/grub/grub.cfg
-	echo '  boot'                                >> $(ISO_DIR)/boot/grub/grub.cfg
-	echo '}'                                     >> $(ISO_DIR)/boot/grub/grub.cfg
-	$(GRUBMK) -o $(BUILD)/os.iso $(ISO_DIR)
-	@echo "✅ ISO built successfully: $(BUILD)/os.iso"
-	@echo "🗺  Linker map: $(KERNEL_MAP)"
+
+	# limine.conf
+	cp limine.conf $(ISO_DIR)/limine.conf
+	
+
+
+	mkdir -p $(ISO_DIR)/boot
+	cp $(ISO_DIR)/limine.conf $(ISO_DIR)/boot/limine.conf
+
+	# Create ISO
+	xorriso -as mkisofs \
+		-R -J \
+		-V "PARANOS" \
+		-b limine-bios.sys \
+			-no-emul-boot \
+			-boot-load-size 4 \
+			-boot-info-table \
+		-eltorito-alt-boot \
+		-e limine-uefi-cd.bin \
+			-no-emul-boot \
+		-isohybrid-mbr limine/limine-bios.sys \
+		-partition_offset 16 \
+		-append_partition 2 0xef limine/limine-uefi-cd.bin \
+	-o build/os.iso \
+	iso_root
+
+
+
+
+
+	# Patch ISO with limine-install
+	$(LIMINE_DIR)/limine bios-install $(abspath $(BUILD)/os.iso)
+
+	@echo "====================================================="
+	@echo "  Limine ISO built successfully: $(BUILD)/os.iso"
+	@echo "====================================================="
 
 # =====================================================
-#   Run & Debug
+#   Run
 # =====================================================
+
 run: iso
-	qemu-system-i386 -cdrom $(BUILD)/os.iso -serial stdio -m 256M -vga vmware
+	sudo qemu-system-x86_64 -m 1024M -machine q35 \
+		-drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
+		-drive if=pflash,format=raw,file=/usr/share/OVMF/OVMF_VARS_4M.fd \
+		-device piix3-ide,id=ide \
+		-drive id=hd0,file=disk.img,if=none,format=raw \
+		-device ide-hd,drive=hd0,bus=ide.0,bootindex=2 \
+		-drive id=cd0,file=build/os.iso,if=none,format=raw,media=cdrom \
+		-device ide-cd,drive=cd0,bus=ide.1,bootindex=1 \
+		-nic none \
+		-boot order=d,menu=on -serial stdio -vga std -display sdl
 
-debug: iso
-	qemu-system-i386 -cdrom $(BUILD)/os.iso -serial stdio -no-reboot -no-shutdown \
-		-monitor telnet:127.0.0.1:55555,server,nowait -vga vmware -m 256M \
-		-d int,cpu_reset,guest_errors -M smm=off
 
 # =====================================================
-#   Verify / Clean
+#   Utilities
 # =====================================================
-verify: $(KERNEL_ELF)
-	@echo "=== readelf -S ==="; readelf -S $(KERNEL_ELF) | sed -n '1,200p'
-	@echo "=== objdump -h ==="; objdump -h $(KERNEL_ELF)
-	@echo "=== multiboot2 header probe (grep) ==="
-	@objdump -s -j .multiboot2 $(KERNEL_ELF) | head -n 40 || true
-	@echo "=== first few map lines ==="; head -n 60 $(KERNEL_MAP) || true
-	@echo "Tip: 확인할 심볼 → __text_lma, __kernel_high_start, __kernel_high_end, page_directory"
+
 
 clean:
 	rm -rf $(BUILD) $(ISO_DIR)
 
-.PHONY: all clean run debug iso verify
+.PHONY: all clean run iso
+
+link: $(KERNEL_ELF)
+
+.PHONY: link

@@ -1,24 +1,46 @@
 #pragma once
 #include <stdint.h>
+#include <sys/cpu.h>
 
-static inline void outb(uint16_t port, uint8_t val){
-    __asm__ volatile ("outb %0, %1" :: "a"(val), "Nd"(port));
+static inline void io_wait(void) {
+    outb(0x80, 0);
 }
-static inline uint8_t inb(uint16_t port){
-    uint8_t ret;
-    __asm__ volatile ("inb %1, %0" : "=a"(ret) : "Nd"(port));
-    return ret;
+
+
+/* ===== 64비트 컨트롤 레지스터 접근 ===== */
+
+static inline uint64_t read_cr0(void) {
+    uint64_t val;
+    __asm__ volatile ("mov %%cr0, %0" : "=r"(val));
+    return val;
 }
-static inline void io_wait(void){
-    /* 0x80 dummy 포트 접근으로 약간의 지연 */
-    __asm__ volatile ("outb %%al, $0x80" :: "a"(0));
+
+static inline void write_cr0(uint64_t val) {
+    __asm__ volatile ("mov %0, %%cr0" :: "r"(val) : "memory");
 }
-uint32_t read_cr0(void);
-uint32_t read_cr3(void);
-uint32_t get_eip(void);
+
+static inline uint64_t read_cr3(void) {
+    uint64_t val;
+    __asm__ volatile ("mov %%cr3, %0" : "=r"(val));
+    return val;
+}
+
+static inline void write_cr3(uint64_t val) {
+    __asm__ volatile ("mov %0, %%cr3" :: "r"(val) : "memory");
+}
+
+static inline uint64_t read_cr4(void) {
+    uint64_t val;
+    __asm__ volatile ("mov %%cr4, %0" : "=r"(val));
+    return val;
+}
+
+static inline void write_cr4(uint64_t val) {
+    __asm__ volatile ("mov %0, %%cr4" :: "r"(val) : "memory");
+}
+
+/* 이 아래 함수들은 32비트 용도라면 나중에 전부 64비트로 교체하는 게 좋습니다 */
 uint32_t get_esp(void);
-uint32_t virt_to_phys(uint32_t *pgdir, uint32_t vaddr);
-
 
 static inline void cli(void) { __asm__ volatile ("cli"); }
 static inline void sti(void) { __asm__ volatile ("sti"); }

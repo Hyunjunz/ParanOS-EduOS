@@ -13,9 +13,7 @@ struct bootinfo {
 extern struct bootinfo g_bootinfo;
 extern uint32_t g_mbinfo_phys;
 
-/* ─────────────────────────────── */
-/* 주소 변환 심볼과 매크로 추가   */
-/* ─────────────────────────────── */
+
 extern char __kernel_high_start[];
 extern char __kernel_phys_start[];
 

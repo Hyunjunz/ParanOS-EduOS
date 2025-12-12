@@ -1,6 +1,9 @@
-[bits 32]
+[BITS 64]
 global tss_flush
+
+; void tss_flush(uint16_t sel);
+; Load TR with the selector provided by the caller.
 tss_flush:
-    mov ax, 0x28        ; ← TSS descriptor selector, RPL=0 꼭!
-    ltr ax
+    mov     ax, di          ; lower 16 bits of first arg
+    ltr     ax
     ret

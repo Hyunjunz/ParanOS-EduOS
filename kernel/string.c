@@ -3,7 +3,6 @@
 #include <stdint.h>
 
 
-/* ─────────────── 기본 libc 대체 구현 ─────────────── */
 
 void* memset(void* dst, int c, size_t n) {
     unsigned char* p = (unsigned char*)dst;
@@ -18,10 +17,31 @@ void* memcpy(void* dst, const void* src, size_t n) {
     return dst;
 }
 
-size_t strlen(const char* s) {
-    size_t i = 0;
-    while (s[i]) ++i;
-    return i;
+int memcmp(const void* a, const void* b, size_t n) {
+    const unsigned char* p = (const unsigned char*)a;
+    const unsigned char* q = (const unsigned char*)b;
+    while (n--) {
+        unsigned char x = *p++;
+        unsigned char y = *q++;
+        if (x != y) return (int)x - (int)y;
+    }
+    return 0;
+}
+
+void* memmove(void* dst, const void* src, size_t n) {
+    unsigned char* d = (unsigned char*)dst;
+    const unsigned char* s = (const unsigned char*)src;
+    if (d == s || n == 0) {
+        return dst;
+    }
+    if (d < s) {
+        while (n--) *d++ = *s++;
+    } else {
+        d += n;
+        s += n;
+        while (n--) *--d = *--s;
+    }
+    return dst;
 }
 
 static void itoa_dec(char *buf, unsigned int val) {

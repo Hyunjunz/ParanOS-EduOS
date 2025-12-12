@@ -38,6 +38,14 @@ void     schedule_from_timer(void);
 void     yield(void);              
 task_t*  current_task(void);
 
+// Simple task enumeration helpers for kernel GUI (task manager)
+task_t*  task_enum_head(void);
+task_t*  task_enum_next(task_t *t);
+
+// Simple CPU usage helpers for System Monitor
+uint32_t task_cpu_usage_percent(void);
+void     task_cpu_reset(void);
+
 
 task_t*  proc_create_user(uint32_t entry_user, uint32_t user_stack_top,
                           uint32_t *pgdir, const char *name);

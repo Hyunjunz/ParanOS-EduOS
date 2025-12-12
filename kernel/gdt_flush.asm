@@ -1,23 +1,31 @@
-; gdt_flush.asm
+; ============================================================
+; gdt_flush.asm - Long Mode 안전 버전
+; ============================================================
+
+bits 64
+default rel
+
 global gdt_flush
 
-SECTION .text
-BITS 32
+section .text
+
+; ------------------------------------------------------------
+; void gdt_flush(struct gdtr *gdtr)
+; ------------------------------------------------------------
 gdt_flush:
-    ; cdecl: [esp+4] = &gp (가상주소)
-    mov     eax, [esp+4]
-    cli
-    lgdt    [eax]            ; 6바이트 의사-디스크립터 (limit:16, base:32)
+    lgdt [rdi]
 
-    ; CS는 far jump로 재적재 (selector=0x08: 커널 코드)
-    jmp     0x08:.flush_cs
-
-.flush_cs:
-    mov ax, 0x10
+    ; Reload data segments
+    mov ax, 0x10          ; kernel data segment
+    mov ss, ax
     mov ds, ax
     mov es, ax
-    mov fs, ax
-    mov gs, ax
-    mov ss, ax
-    ; sti ← ❌ 제거
+
+    ; Far return to reload CS with our code segment (0x08)
+    push qword 0x08
+    lea  rax, [rel flush_done]
+    push rax
+    lretq
+
+flush_done:
     ret

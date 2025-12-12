@@ -20,6 +20,9 @@ static task_t   *g_current     = NULL;
 static task_t   *g_readyq      = NULL;   /* 원형 큐 헤드 */
 static uint32_t  g_next_tid    = 1;
 static int       sched_enabled = 0;
+static task_t   *g_idle_task   = NULL;
+static uint64_t  g_cpu_total_ticks = 0;
+static uint64_t  g_cpu_idle_ticks  = 0;
 
 /* 외부에서 현재 태스크 조회 */
 task_t* current_task(void) { return g_current; }
@@ -157,6 +160,10 @@ static void schedule(void) {
 /* PIT ISR에서 호출 */
 void schedule_from_timer(void) {
     if (!sched_enabled || !g_current) return;
+
+    g_cpu_total_ticks++;
+    if (g_idle_task && g_current == g_idle_task)
+        g_cpu_idle_ticks++;
     if (--g_current->time_slice <= 0) {
         g_current->time_slice = TIME_SLICE_TICKS;
         schedule();
@@ -187,7 +194,7 @@ void tasking_init(void) {
     g_bootstrap.next= &g_bootstrap;
 
     /* idle */
-    kthread_create(idle_thread, 0, "idle");
+    g_idle_task = kthread_create(idle_thread, 0, "idle");
 }
 
 /* 데모용 커널 스레드 */
@@ -245,4 +252,58 @@ task_t* proc_create_user(uint32_t entry_user, uint32_t user_stack_top,
     prepare_user_first_switch(t, entry_user, user_stack_top);
     rq_push(t);
     return t;
+}
+
+/* CPU usage helpers for System Monitor */
+uint32_t task_cpu_usage_percent(void)
+{
+    static uint64_t prev_total = 0;
+    static uint64_t prev_idle  = 0;
+
+    uint64_t total64 = g_cpu_total_ticks;
+    uint64_t idle64  = g_cpu_idle_ticks;
+
+    uint64_t delta_total = total64 - prev_total;
+    uint64_t delta_idle  = idle64  - prev_idle;
+
+    prev_total = total64;
+    prev_idle  = idle64;
+
+    if (delta_total == 0) {
+        // No time elapsed since last sample; keep previous reading (assume 0%).
+        return 0;
+    }
+
+    uint64_t delta_busy = (delta_total > delta_idle) ? (delta_total - delta_idle) : 0;
+    uint32_t pct = (uint32_t)((delta_busy * 100u) / delta_total);
+    if (pct > 100u)
+        pct = 100u;
+    return pct;
+}
+
+void task_cpu_reset(void)
+{
+    g_cpu_total_ticks = 0;
+    g_cpu_idle_ticks = 0;
+}
+
+/* Task enumeration helpers for GUI (task manager) */
+task_t* task_enum_head(void)
+{
+    if (!g_readyq)
+        return NULL;
+    return g_readyq->next;
+}
+
+task_t* task_enum_next(task_t *t)
+{
+    if (!t || !g_readyq)
+        return NULL;
+    task_t *next = t->next;
+    if (!next)
+        return NULL;
+    /* Stop after one full cycle around the ready queue ring */
+    if (next == g_readyq->next)
+        return NULL;
+    return next;
 }

@@ -2,6 +2,12 @@
 #include "bootinfo.h"
 #include "mm/vmm.h"
 
+#ifndef VMM_RW
+#define VMM_RW  VMM_FLAG_WRITE
+#define VMM_PWT (1u << 3)
+#define VMM_PCD (1u << 4)
+#endif
+
 #define FB_VIRT_BASE 0xE0000000u   // 한 번만 정의하고, 커널 전역과 동일하게 유지
 
 static inline uint32_t align_up(uint32_t x, uint32_t a){ return (x + a - 1) & ~(a - 1); }
@@ -33,7 +39,9 @@ void map_framebuffer(uint32_t fb_phys, uint32_t fb_pitch, uint32_t fb_w, uint32_
 }
 
 /* 이후 그리기: (32bpp 가정) */
-static inline volatile uint8_t* fb_ptr(void){ return (volatile uint8_t*)FB_VIRT_BASE; }
+static inline volatile uint8_t* fb_ptr(void){
+    return (volatile uint8_t*)g_bootinfo.fb_virt;   // ← 수정: FB_VIRT_BASE 고정 금지
+}
 
 void fb_fill(uint32_t rgba){
     volatile uint8_t* fb = fb_ptr();

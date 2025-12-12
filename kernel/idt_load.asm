@@ -1,7 +1,10 @@
-BITS 32
+; idt_load.asm - x86_64 long mode IDT load
+
+BITS 64
 global idt_load
-extern idtp         ; C 코드에서 static 아니어야 함!
+extern idtp         ; C side provides idtp (limit + base)
 
 idt_load:
-    lidt [idtp]     ; IDTR ← idtp 구조체 (limit + base)
+    lidt    [idtp]  ; load IDTR from idtp
     ret
+

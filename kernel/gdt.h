@@ -1,48 +1,53 @@
 #pragma once
 #include <stdint.h>
 
-#define ACC_P     0x80
-#define ACC_DPL0  0x00
-#define ACC_DPL3  0x60
-#define ACC_S     0x10
-#define ACC_EXEC  0x08
-#define ACC_DC    0x04
-#define ACC_RW    0x02
-#define ACC_AC    0x01
+/* ───────────────
+ * GDT 인덱스 / 셀렉터
+ * ─────────────── */
+#define GDT_IDX_NULL         0
+#define GDT_IDX_KERNEL_CODE  1
+#define GDT_IDX_KERNEL_DATA  2
+#define GDT_IDX_TSS          3   // TSS descriptor (16 bytes: index 3 and 4 사용)
 
-/* 타입 조합 */
-#define ACC_CODE_K  (ACC_P|ACC_DPL0|ACC_S|ACC_EXEC|ACC_RW)  /* 0x9A */
-#define ACC_DATA_K  (ACC_P|ACC_DPL0|ACC_S|ACC_RW)           /* 0x92 */
-#define ACC_CODE_U  (ACC_P|ACC_DPL3|ACC_S|ACC_EXEC|ACC_RW)  /* 0xFA */
-#define ACC_DATA_U  (ACC_P|ACC_DPL3|ACC_S|ACC_RW)           /* 0xF2 */
+/* 셀렉터 = 인덱스 << 3 */
+#define GDT_SEL_KERNEL_CODE  (GDT_IDX_KERNEL_CODE << 3)
+#define GDT_SEL_KERNEL_DATA  (GDT_IDX_KERNEL_DATA << 3)
+#define GDT_SEL_TSS          (GDT_IDX_TSS         << 3)
 
-/* granularity */
-#define GRAN_4K  0x80
-#define GRAN_32  0x40
+/* 기존 df_tss.c 와의 호환용 이름 */
+#define GDT_IDX_DF_TSS       GDT_IDX_TSS
+#define GDT_SEL_DF_TSS       GDT_SEL_TSS
 
+/* GDTR 구조체 */
+struct gdtr {
+    uint16_t limit;
+    uint64_t base;
+} __attribute__((packed));
 
-/* ────────────────────────────────
- * Segment Selectors
- * ──────────────────────────────── */
-#define GDT_KCODE 0x08
-#define GDT_KDATA 0x10
-#define GDT_UCODE 0x1B
-#define GDT_UDATA 0x23
-#define GDT_TSS   0x28
+/* 64비트 TSS 구조체 (Long Mode용) */
+struct tss64 {
+    uint32_t reserved0;
+    uint64_t rsp0;
+    uint64_t rsp1;
+    uint64_t rsp2;
+    uint64_t reserved1;
 
-#define GDT_IDX_TSS      5
-#define GDT_SEL_TSS     ((GDT_IDX_TSS) << 3)
+    uint64_t ist1;
+    uint64_t ist2;
+    uint64_t ist3;
+    uint64_t ist4;
+    uint64_t ist5;
+    uint64_t ist6;
+    uint64_t ist7;
 
-#define GDT_IDX_DF_TSS   6
-#define GDT_SEL_DF_TSS  ((GDT_IDX_DF_TSS) << 3)
+    uint64_t reserved2;
+    uint16_t reserved3;
+    uint16_t iopb_offset;
+} __attribute__((packed));
 
-void gdt_install_with_tss(uint32_t kernel_stack_top);
+/* 전역 TSS 객체 (gdt.c 에서 정의) */
+extern struct tss64 g_tss;
 
-
-#define ACC_CODE_KERN  ACC_CODE_K
-#define ACC_DATA_KERN  ACC_DATA_K
-#define ACC_CODE_USER  ACC_CODE_U
-#define ACC_DATA_USER  ACC_DATA_U
-
-#define GDT_USER_CODE 0x1B  // selector index 3, RPL=3
-#define GDT_USER_DATA 0x23 
+/* 초기화 함수들 */
+void gdt_init(uint64_t kernel_stack_top);
+void tss_set_df_ist(uint64_t ist_stack_top);

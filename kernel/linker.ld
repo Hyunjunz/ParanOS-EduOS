@@ -1,74 +1,100 @@
+/* 64비트 ELF 커널 */
+OUTPUT_FORMAT("elf64-x86-64")
+OUTPUT_ARCH(i386:x86-64)
 ENTRY(_start)
 
-PHYS_BASE = 0x00100000;   /* 1 MiB */
-VIRT_BASE = 0xC0000000;   /* high-half base */
+/* 원하는 커널 가상주소 (하이하프 커널) */
+KERNEL_VMA = 0xFFFFFFFF80000000;
 
 SECTIONS
 {
-  /* ── 1) 물리 저주소: GRUB이 직접 읽는 영역 ───────────────── */
-  . = PHYS_BASE;
+    /* 하이하프 커널 VMA 시작 */
+    . = KERNEL_VMA;
 
-  .multiboot2 ALIGN(8) : {
-    KEEP(*(.multiboot2))
-  }
+    /* ───────────────────────────────
+       Limine request 영역 (순서 + AT 중요)
+       ─────────────────────────────── */
+    .limine_requests_start_marker ALIGN(8) :
+        AT(ADDR(.limine_requests_start_marker) - KERNEL_VMA)
+    {
+        KEEP(*(.limine_requests_start_marker))
+    }
 
-  . = ALIGN(4096);
-  .boot ALIGN(4096) : {
-    KEEP(*(.boot*))
-  }
+    .limine_requests ALIGN(8) :
+        AT(ADDR(.limine_requests) - KERNEL_VMA)
+    {
+        KEEP(*(.limine_requests))
+    }
 
-  /* .boot 끝의 '물리' 위치를 고정 상수로 캡처 */
-  __KERN_PHYS_BASE = ALIGN(LOADADDR(.boot) + SIZEOF(.boot), 4096);
+    .limine_requests_end_marker ALIGN(8) :
+        AT(ADDR(.limine_requests_end_marker) - KERNEL_VMA)
+    {
+        KEEP(*(.limine_requests_end_marker))
+    }
 
-  /* ── 2) 하이하프(가상) 커널 본체: VMA는 고정, LMA는 공식으로 계산 ─ */
-  . = VIRT_BASE;
+    /* ───────────────────────────────
+       TEXT SECTION
+       ─────────────────────────────── */
+    .text ALIGN(0x1000) :
+        AT(ADDR(.text) - KERNEL_VMA)
+    {
+        KEEP(*(.text.boot))     /* 초기 부트코드(필요 시) */
+        *(.text*)
+    }
 
-  /* 코드 */
-  .text ALIGN(4096) :
-    AT( ADDR(.text) - VIRT_BASE + __KERN_PHYS_BASE )
-  {
-    *(.text*)
-  }
+    /* ───────────────────────────────
+       RODATA SECTION
+       ─────────────────────────────── */
+    .rodata ALIGN(0x1000) :
+        AT(ADDR(.rodata) - KERNEL_VMA)
+    {
+        *(.rodata*)
+    }
 
-  /* (C/ASM 커널이면 보통 버림) */
-  /DISCARD/ : {
-    *(.eh_frame) *(.eh_frame.*) *(.eh_frame_hdr)
-    *(.gcc_except_table*) *(.gnu.build.attributes*)
-  }
+    /* ───────────────────────────────
+       DATA SECTION
+       ─────────────────────────────── */
+    .data ALIGN(0x1000) :
+        AT(ADDR(.data) - KERNEL_VMA)
+    {
+        data_begin = .;
+        s2_data_begin = .;
+        *(.data*)
+        s2_data_end = .;
+        data_end = .;
+    }
 
-  /* 읽기 전용 데이터 */
-  .rodata ALIGN(4096) :
-    AT( ADDR(.rodata) - VIRT_BASE + __KERN_PHYS_BASE )
-  {
-    *(.rodata*)
-  }
+    /* ───────────────────────────────
+       BSS SECTION
+       ─────────────────────────────── */
+    .bss ALIGN(0x1000) :
+        AT(ADDR(.bss) - KERNEL_VMA)
+    {
+        bss_begin = .;
+        *(COMMON)
+        *(.bss*)
+        bss_end = .;
+    }
 
-  /* 초기화 데이터 */
-  .data ALIGN(4096) :
-    AT( ADDR(.data) - VIRT_BASE + __KERN_PHYS_BASE )
-  {
-    *(.data*)
-  }
+    /* ───────────────────────────────
+       DISCARD (필요 없는 섹션 제거)
+       ─────────────────────────────── */
+    /DISCARD/ :
+    {
+        *(.eh_frame*)
+        *(.note*)
+        *(.comment*)
+    }
 
-  /* BSS */
-  .bss ALIGN(4096) :
-    AT( ADDR(.bss) - VIRT_BASE + __KERN_PHYS_BASE )
-  {
-    *(COMMON)
-    *(.bss*)
-  }
+    /* ───────────────────────────────
+       공개 심볼
+       ─────────────────────────────── */
+    __kernel_start      = ADDR(.text);
+    __kernel_end        = ADDR(.bss) + SIZEOF(.bss);
 
-  /* (선택) 스택: 이미지에 포함하지 않음 */
-  .stack ALIGN(16) (NOLOAD) : {
-    stack_bottom = .;
-    . += 4096;
-    stack_top = .;
-  }
-
-  /* ── 공개 심볼 ───────────────────────────────────────────── */
-  __text_lma           = LOADADDR(.text);
-  __kernel_high_start  = ADDR(.text);
-  __kernel_high_end    = ADDR(.bss) + SIZEOF(.bss);
-  __kernel_phys_start  = LOADADDR(.text);
-  __kernel_phys_end    = LOADADDR(.bss) + SIZEOF(.bss);
+    __kernel_phys_start = LOADADDR(.text);
+    __kernel_phys_end   = LOADADDR(.bss) + SIZEOF(.bss);
+    __kernel_high_start = ADDR(.text);
+    __kernel_high_end   = ADDR(.bss) + SIZEOF(.bss);
+    __text_lma          = LOADADDR(.text);
 }

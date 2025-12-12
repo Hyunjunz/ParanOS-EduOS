@@ -16,10 +16,13 @@ void keyboard_handler(void) {
 #include <stdint.h>
 
 void syscall_handler(uint32_t num, uint32_t a, uint32_t b, uint32_t c, uint32_t d) {
+    (void)b;
+    (void)c;
+    (void)d;
     switch (num)
     {
     case 0:
-        serial_printf("[syscall] write %s\n", (char*)a);
+        serial_printf("[syscall] write %s\n", (char*)(uintptr_t)a);
         break;
     
     default:
@@ -28,6 +31,7 @@ void syscall_handler(uint32_t num, uint32_t a, uint32_t b, uint32_t c, uint32_t 
 }
 
 void isr_syscall(void* frame) {
+    (void)frame;
     uint32_t num, a, b, c, d;
     __asm__ volatile (
         "movl %%eax, %0\n"
@@ -44,7 +48,8 @@ void isr_syscall(void* frame) {
 
 
 void syscall_init(void){
-    idt_set_gate(0x80, (uint32_t)isr_syscall, 0x08, 0xEE);
+    idt_set_gate(0x80, (uint64_t)isr_syscall, 0x08, 0xEE, 0);
+
     serial_printf("[syscall] int 0x80 handler installed.\n"); 
 }
 

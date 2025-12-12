@@ -27,7 +27,8 @@ void     pmm_init(void* heap_top);
 
 /* 물리 페이지 한 장(4KiB) 할당/해제 */
 void*    pmm_alloc(void);
-void     pmm_free(void* phys_addr);
+uint32_t pmm_alloc_phys(void);
+void     pmm_free_page(void* phys_addr);
 
 /* 예약/해제(범위) — 페이지 경계 단위 */
 void     pmm_reserve_range(uintptr_t phys_begin, uintptr_t phys_end);

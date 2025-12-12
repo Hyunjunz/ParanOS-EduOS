@@ -51,16 +51,42 @@ static void u32_to_hex(uint32_t v, char* buf, int width, int upper) {
     buf[j]=0;
 }
 
+static void u64_to_hex(uint64_t v, char *buf, int width, int upper) {
+    const char *H = upper ? "0123456789ABCDEF" : "0123456789abcdef";
+    char t[16];
+    for (int i = 0; i < 16; i++) {
+        t[15 - i] = H[v & 0xF];
+        v >>= 4;
+    }
+    int start = 16 - width;
+    if (start < 0) start = 0;
+    int j = 0;
+    for (int i = start; i < 16; i++) buf[j++] = t[i];
+    buf[j] = 0;
+}
+
+static void u64_to_dec(uint64_t v, char *buf) {
+    char t[21];
+    int n = 0;
+    if (!v) { buf[0] = '0'; buf[1] = 0; return; }
+    while (v) { t[n++] = '0' + (v % 10); v /= 10; }
+    for (int i = 0; i < n; i++) buf[i] = t[n - 1 - i];
+    buf[n] = 0;
+}
+
 void serial_printf(const char* fmt, ...) {
     va_list ap; va_start(ap, fmt);
     for (const char* p=fmt; *p; ++p) {
         if (*p != '%') { serial_putc(COM1, *p); continue; }
         ++p;
         int zero_pad = 0, width = 0, upper=1;
+        int len_mod = 0; // 0=default(int),1=long,2=long long,3=size_t
         if (*p=='0') { zero_pad=1; ++p; }
         while (*p>='0' && *p<='9') { width = width*10 + (*p-'0'); ++p; }
+        if (*p=='l') { len_mod = 1; ++p; if (*p=='l') { len_mod = 2; ++p; } }
+        else if (*p=='z') { len_mod = 3; ++p; }
 
-        char tmp[16];
+        char tmp[32];
         switch (*p) {
             case 'c': {
                 char c=(char)va_arg(ap,int);
@@ -71,41 +97,56 @@ void serial_printf(const char* fmt, ...) {
                 serial_puts(COM1,s?s:"(null)");
             } break;
             case 'u': {
-                uint32_t v=va_arg(ap,uint32_t);
-                u32_to_dec(v,tmp);
+                uint64_t v = 0;
+                if (len_mod == 2) v = va_arg(ap, unsigned long long);
+                else if (len_mod == 1 || len_mod == 3) v = va_arg(ap, unsigned long);
+                else v = va_arg(ap, unsigned int);
+                u64_to_dec(v,tmp);
                 int len=0; while(tmp[len]) len++;
                 for (int i=len;i<width;i++) serial_putc(COM1, zero_pad?'0':' ');
                 serial_puts(COM1,tmp);
             } break;
             case 'x': case 'X': {
                 upper = (*p=='X');
-                uint32_t v=va_arg(ap,uint32_t);
-                if (width==0) width=8;
-                u32_to_hex(v,tmp,width,upper);
+                uint64_t v = 0;
+                if (len_mod == 2) v = va_arg(ap, unsigned long long);
+                else if (len_mod == 1 || len_mod == 3) v = va_arg(ap, unsigned long);
+                else v = va_arg(ap, unsigned int);
+                if (width==0) width = (len_mod >= 1) ? 16 : 8;
+                u64_to_hex(v,tmp,width,upper);
                 int len=0; while(tmp[len]) len++;
                 for (int i=len;i<width;i++) serial_putc(COM1,'0');
                 serial_puts(COM1,tmp);
             } break;
-            case '%':
-                serial_putc(COM1,'%');
-                break;
+            case 'p': {
+                uint64_t v = (uint64_t)(uintptr_t)va_arg(ap, void *);
+                if (width == 0) width = 16;
+                u64_to_hex(v, tmp, width, 0);
+                int len = 0; while (tmp[len]) len++;
+                for (int i = len; i < width; i++) serial_putc(COM1, '0');
+                serial_puts(COM1, tmp);
+            } break;
             case 'd': {
-                int v = va_arg(ap, int);
-                uint32_t uv;
-
+                int64_t v;
+                if (len_mod == 2) v = va_arg(ap, long long);
+                else if (len_mod == 1 || len_mod == 3) v = va_arg(ap, long);
+                else v = va_arg(ap, int);
+                uint64_t uv;
                 if (v < 0) {
                     serial_putc(COM1, '-');
-                    uv = (uint32_t)(-v);
+                    uv = (uint64_t)(-v);
                 } else {
-                    uv = (uint32_t)v;
+                    uv = (uint64_t)v;
                 }
-                u32_to_dec(uv, tmp);
-                int len = 0; 
-                while (tmp[len]) len++;
-                for (int i = len; i< width; i++) 
+                u64_to_dec(uv, tmp);
+                int len = 0; while (tmp[len]) len++;
+                for (int i = len; i< width; i++)
                     serial_putc(COM1, zero_pad ? '0' : ' ');
                 serial_puts(COM1, tmp);
             } break;
+            case '%':
+                serial_putc(COM1,'%');
+                break;
             default:
                 serial_putc(COM1,'%'); serial_putc(COM1,*p);
                 break;

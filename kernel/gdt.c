@@ -1,93 +1,100 @@
+#include <stdint.h>
 #include "gdt.h"
-#include "tss.h"
 
-typedef struct {
+/* ───────────────
+ * GDT 엔트리 레이아웃
+ * ─────────────── */
+
+/* 일반 세그먼트(코드/데이터)용 8바이트 디스크립터 */
+static uint64_t make_code64_desc(void) {
+    /*
+     * 64비트 코드 세그먼트 (base=0, limit=0xFFFFF, G=1, L=1, D=0)
+     * 0x00AF9A000000FFFF 패턴 자주 사용됨
+     */
+    return 0x00AF9A000000FFFFULL;
+}
+
+static uint64_t make_data_desc(void) {
+    /* 데이터 세그먼트 (base=0, limit=0xFFFFF, G=1, L=0, D=1 or 0)
+     * 64비트에서는 D 비트는 무시되지만 일반적으로 0x00AF92000000FFFF 자주 사용
+     */
+    return 0x00AF92000000FFFFULL;
+}
+
+/* TSS 디스크립터 (16바이트) */
+struct tss_descriptor {
     uint16_t limit_low;
     uint16_t base_low;
-    uint8_t  base_mid;
-    uint8_t  access;
-    uint8_t  gran;
-    uint8_t  base_hi;
-} __attribute__((packed)) gdt_entry_t;
+    uint8_t  base_mid1;
+    uint8_t  type;       // 0x89: 64-bit available TSS
+    uint8_t  limit_high  : 4;
+    uint8_t  flags       : 4;
+    uint8_t  base_mid2;
+    uint32_t base_high;
+    uint32_t reserved;
+} __attribute__((packed));
 
-typedef struct {
-    uint16_t limit;
-    uint32_t base;
-} __attribute__((packed)) gdt_ptr_t;
+/* GDT 전체 – 0:null, 1:code, 2:data, 3:TSS(16B) */
+static struct {
+    uint64_t        null;
+    uint64_t        code;
+    uint64_t        data;
+    struct tss_descriptor tss_desc;
+} __attribute__((packed)) gdt;
 
-static gdt_entry_t gdt[8];
-static gdt_ptr_t   gp;
+/* 전역 TSS 객체 */
+struct tss64 g_tss;
 
-tss_t g_tss;
+/* GDTR */
+static struct gdtr gdt_reg;
 
-void gdt_set_gate(int idx, uint32_t base, uint32_t limit, uint8_t access, uint8_t gran)
-{
-    gdt[idx].base_low  = base & 0xFFFF;
-    gdt[idx].base_mid  = (base >> 16) & 0xFF;
-    gdt[idx].base_hi   = (base >> 24) & 0xFF;
-    gdt[idx].limit_low = limit & 0xFFFF;
-    gdt[idx].gran      = ((limit >> 16) & 0x0F) | (gran & 0xF0);
-    gdt[idx].access    = access;
+/* 외부 ASM 함수 */
+extern void gdt_flush(struct gdtr *gdtr);
+extern void tss_flush(uint16_t sel);
+
+/* TSS 디스크립터 채우기 */
+static void set_tss_descriptor(struct tss_descriptor *d, struct tss64 *tss) {
+    uint64_t base  = (uint64_t)tss;
+    uint32_t limit = sizeof(struct tss64) - 1;
+
+    d->limit_low   = (uint16_t)(limit & 0xFFFF);
+    d->base_low    = (uint16_t)(base & 0xFFFF);
+    d->base_mid1   = (uint8_t)((base >> 16) & 0xFF);
+    d->type        = 0x89;  // 64-bit available TSS
+    d->limit_high  = (limit >> 16) & 0xF;
+    d->flags       = 0;     // G=0 (byte granularity), AVL=0
+    d->base_mid2   = (uint8_t)((base >> 24) & 0xFF);
+    d->base_high   = (uint32_t)(base >> 32);
+    d->reserved    = 0;
 }
 
-extern void gdt_flush(uint32_t gdt_ptr);
-extern void tss_flush(void);
+void gdt_init(uint64_t kernel_stack_top) {
+    /* GDT 엔트리 설정 */
+    gdt.null = 0;
+    gdt.code = make_code64_desc();
+    gdt.data = make_data_desc();
 
-#define ACC_P      0x80
-#define ACC_DPL0   0x00
-#define ACC_DPL3   0x60
-#define ACC_S      0x10   /* descriptor type (1=code/data) */
-#define ACC_EXEC   0x08   /* executable */
-#define ACC_RW     0x02   /* readable/writable */
-#define ACC_TSS    0x09   /* 32-bit available TSS */
-#define GRAN_4K    0x80
-#define GRAN_32    0x40
+    /* TSS 초기화 */
+    for (unsigned i = 0; i < sizeof(g_tss); i++)
+        ((uint8_t *)&g_tss)[i] = 0;
 
-#define KERNEL_CS  0x08
-#define KERNEL_DS  0x10
-#define USER_CS    0x1B   // index=3, TI=0, RPL=3
-#define USER_DS    0x23   // index=4, TI=0, RPL=3
+    g_tss.rsp0 = kernel_stack_top;
+    g_tss.iopb_offset = sizeof(struct tss64);
 
-#define GDT_ENTRY(base, limit, access, flags)
+    set_tss_descriptor(&gdt.tss_desc, &g_tss);
 
-#define ACC_CODE_K (ACC_P|ACC_DPL0|ACC_S|ACC_EXEC|ACC_RW)  /* 0x9A */
-#define ACC_DATA_K (ACC_P|ACC_DPL0|ACC_S|ACC_RW)           /* 0x92 */
-#define ACC_CODE_U (ACC_P|ACC_DPL3|ACC_S|ACC_EXEC|ACC_RW)  /* 0xFA */
-#define ACC_DATA_U (ACC_P|ACC_DPL3|ACC_S|ACC_RW)           /* 0xF2 */
+    /* GDTR 설정 */
+    gdt_reg.limit = sizeof(gdt) - 1;
+    gdt_reg.base  = (uint64_t)&gdt;
 
-void gdt_install_with_tss(uint32_t kstack_top)
-{
-    gp.limit = sizeof(gdt) - 1;
-    gp.base  = (uint32_t)&gdt[0];
+    /* GDT 로드 + 세그먼트 재설정 */
+    gdt_flush(&gdt_reg);
 
-    /* 0: null */
-    gdt_set_gate(0, 0, 0, 0, 0);
-
-    /* 1: kernel code (0x08) */
-    gdt_set_gate(1, 0, 0xFFFFF, ACC_CODE_K, GRAN_4K | GRAN_32);
-
-    /* 2: kernel data (0x10) */
-    gdt_set_gate(2, 0, 0xFFFFF, ACC_DATA_K, GRAN_4K | GRAN_32);
-
-    /* 5: TSS (0x28) */
-    for (uint32_t *p = (uint32_t*)&g_tss; p < (uint32_t*)(&g_tss + 1); ++p)
-        *p = 0;
-
-    g_tss.ss0  = 0x10; /* kernel data */
-    g_tss.esp0 = kstack_top;
-    g_tss.iomap_base = sizeof(tss_t); 
-
-    uint32_t base  = (uint32_t)&g_tss;
-    uint32_t limit = sizeof(tss_t) - 1;   // ← 꼭 -1
-    gdt_set_gate(5, base, limit, ACC_P | ACC_TSS, 0);
-
-    gdt_set_gate(3, 0x00000000, 0xFFFFFFFF, 0xFA, 0xCF);
-    gdt_set_gate(4, 0x00000000, 0xFFFFFFFF, 0xF2, 0xCF);
-
-    /* LGDT + reload segment registers + LTR */
-    gdt_flush((uint32_t)&gp);
-    tss_flush();
+    /* TSS 로드 */
+    tss_flush(GDT_SEL_TSS);
 }
 
-void gdt_set_entry(uint32_t i, uint32_t base, uint32_t limit, uint8_t access, uint8_t gran)
-    __attribute__((alias("gdt_set_gate")));
+/* Double Fault용 IST 스택 설정 (IST1 사용) */
+void tss_set_df_ist(uint64_t ist_stack_top) {
+    g_tss.ist1 = ist_stack_top;
+}
